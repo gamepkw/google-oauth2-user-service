@@ -1,0 +1,8 @@
+port: 9091
+logger-output-path: "../../logs.yaml"
+
+github:
+  clientID: "26a3ebc9548e5bb788c8"
+  clientSecret: "dc866db101e6e24db518936a1ce4b9b19ff0da8e"
+  redirectURL: "http://localhost:3001/home"
+  scopes: "https://www.googleapis.com/auth/userinfo.email"

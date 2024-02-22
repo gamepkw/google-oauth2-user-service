@@ -57,20 +57,14 @@ func (m *middleware) ExtractJWTMiddleware(next echo.HandlerFunc) echo.HandlerFun
 			if err != nil {
 				return c.String(http.StatusUnauthorized, "Cannot validate token")
 			}
-
-			if accessTokenDetail.Error.Code == 401 {
-				return c.String(http.StatusUnauthorized, "Invalid token")
-			} else {
-				c.Set("email", accessTokenDetail.Email)
-				return next(c)
-			}
+			c.Set("accessTokenDetail", accessTokenDetail)
+			return next(c)
 		} else if oauthProvider == "github" {
 			accessTokenDetail, err := m.getAccessTokenDetailGithub(tokenParts[1])
 			if err != nil {
-				fmt.Println(err)
 				return c.String(http.StatusUnauthorized, "Cannot validate token")
 			}
-			c.Set("username", accessTokenDetail.User.Login)
+			c.Set("accessTokenDetail", accessTokenDetail)
 			return next(c)
 		}
 
@@ -79,27 +73,31 @@ func (m *middleware) ExtractJWTMiddleware(next echo.HandlerFunc) echo.HandlerFun
 	}
 }
 
-func (m *middleware) getAccessTokenDetailGoogle(accessToken string) (AccessTokenDetail, error) {
+func (m *middleware) getAccessTokenDetailGoogle(accessToken string) ([]byte, error) {
 	resp, err := http.Get("https://www.googleapis.com/oauth2/v2/userinfo?access_token=" + url.QueryEscape(accessToken))
 	if err != nil {
-		return AccessTokenDetail{}, err
+		return nil, err
 	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, errors.New("Unauthorized")
+	} else if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("Error requesting access token")
+	}
+
 	defer resp.Body.Close()
 
 	response, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return AccessTokenDetail{}, err
+		return nil, err
 	}
 
-	var accessTokenDetail AccessTokenDetail
-	if err := json.Unmarshal(response, &accessTokenDetail); err != nil {
-		return AccessTokenDetail{}, errors.Wrap(err, "failed to unmarshal JSON response")
-	}
+	fmt.Println("Response:", string(response))
 
-	return accessTokenDetail, nil
+	return response, nil
 }
 
-func (m *middleware) getAccessTokenDetailGithub(accessToken string) (GithubDetail, error) {
+func (m *middleware) getAccessTokenDetailGithub(accessToken string) ([]byte, error) {
 
 	clientID := viper.GetString("github.clientID")
 	clientSecret := viper.GetString("github.clientSecret")
@@ -111,7 +109,7 @@ func (m *middleware) getAccessTokenDetailGithub(accessToken string) (GithubDetai
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		fmt.Println("Error creating request:", err)
-		return GithubDetail{}, err
+		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -123,45 +121,41 @@ func (m *middleware) getAccessTokenDetailGithub(accessToken string) (GithubDetai
 	resp, err := client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending request:", err)
-		return GithubDetail{}, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return GithubDetail{}, fmt.Errorf("status: %v", resp.Status)
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, errors.New("Unauthorized")
+	} else if resp.StatusCode != http.StatusOK {
+		return nil, errors.New("Error requesting access token")
 	}
 
 	response, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return GithubDetail{}, err
+		return nil, err
 	}
 
-	var githubDetail GithubDetail
-	if err := json.Unmarshal(response, &githubDetail); err != nil {
-		return GithubDetail{}, errors.Wrap(err, "failed to unmarshal JSON response")
+	formattedResponse := formatJSON(response)
+
+	fmt.Println("Response:", string(formattedResponse))
+
+	return formattedResponse, nil
+}
+
+func formatJSON(jsonBytes []byte) []byte {
+	var data interface{}
+	err := json.Unmarshal(jsonBytes, &data)
+	if err != nil {
+		fmt.Println("Error decoding JSON:", err)
+		return nil
 	}
 
-	fmt.Println("Response Status:", resp.Status)
+	formattedJSON, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		fmt.Println("Error encoding JSON:", err)
+		return nil
+	}
 
-	return githubDetail, nil
-}
-
-type AccessTokenDetail struct {
-	ID            string `json:"id"`
-	Email         string `json:"email"`
-	VerifiedEmail bool   `json:"verified_email"`
-	Error         Error  `json:"error,omitempty"`
-}
-
-type GithubDetail struct {
-	User GithubDetailUser `json:"user"`
-}
-
-type GithubDetailUser struct {
-	Login string `json:"login"`
-	ID    int    `json:"id"`
-}
-
-type Error struct {
-	Code int `json:"code"`
+	return []byte(formattedJSON)
 }
