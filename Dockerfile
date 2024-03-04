@@ -22,7 +22,7 @@ COPY ./config/config.yaml .
 
 WORKDIR /app
 
-EXPOSE 9091
+EXPOSE 8080
 
 ENV TZ=Asia/Bangkok
 
